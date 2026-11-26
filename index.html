@@ -727,6 +727,12 @@ function fmtDoc(d){d=so(d);if(d.length===11)return d.replace(/(\d{3})(\d{3})(\d{
 const fmtChave=c=>String(c||'').replace(/(\d{4})(?=\d)/g,'$1 ');
 const fiscalOk=()=>{const e=cfg().emit;return !!(e&&so(e.cnpj).length===14&&e.razao&&e.end&&e.end.uf&&so(e.end.cMun).length===7)};
 const modoNF=()=>+cfg().fiscal.ambiente===1?'producao':'homologacao';
+const MUNI={};
+async function codMunicipio(xMun,uf){
+  if(!xMun||!uf)return '';
+  try{if(!MUNI[uf]){MUNI[uf]=ls.get('phfeira.muni.'+uf,null)||await (await fetch('https://servicodados.ibge.gov.br/api/v1/localidades/estados/'+uf+'/municipios')).json();ls.set('phfeira.muni.'+uf,MUNI[uf].map(m=>({id:m.id,nome:m.nome})))}
+    const m=MUNI[uf].find(x=>norm(x.nome)===norm(xMun));return m?String(m.id):''}catch(_){return null}
+}
 async function buscaCep(cep){
   cep=so(cep);if(cep.length!==8)throw new Error('CEP inválido');
   let j;try{const r=await fetch('https://viacep.com.br/ws/'+cep+'/json/');j=await r.json()}catch(e){throw new Error('Sem internet para buscar o CEP. Preencha à mão.')}
@@ -812,10 +818,10 @@ function destForm(d){
     '<label class="f span2">Endereço *<input class="i" id="ndLgr" value="'+esc(e.lgr||'')+'"></label>'+
     '<label class="f">Número *<input class="i" id="ndNro" value="'+esc(e.nro||'')+'"></label>'+
     '<label class="f">Complemento<input class="i" id="ndCpl" value="'+esc(e.cpl||'')+'"></label>'+
-    '<label class="f">Bairro *<input class="i" id="ndBairro" value="'+esc(e.bairro||'')+'"></label>'+
+    '<label class="f span2">Bairro *<input class="i" id="ndBairro" value="'+esc(e.bairro||'')+'"></label>'+
     '<label class="f">Cidade *<input class="i" id="ndMun" value="'+esc(e.xMun||'')+'"></label>'+
     '<label class="f">UF *<select class="i" id="ndUF"><option value=""></option>'+UFS.map(u=>'<option'+(u===e.uf?' selected':'')+'>'+u+'</option>').join('')+'</select></label>'+
-    '<label class="f">Código IBGE da cidade *<input class="i mono" id="ndIbge" inputmode="numeric" maxlength="7" value="'+esc(e.cMun||'')+'" title="Preenchido pela busca do CEP"></label>'+
+    '<input type="hidden" id="ndIbge" value="'+esc(e.cMun||'')+'">'+
   '</div>';
 }
 function destBind(m){
@@ -824,6 +830,9 @@ function destBind(m){
   const busca=async()=>{try{const r=await buscaCep($('#ndCep').value);$('#ndLgr').value=r.lgr||$('#ndLgr').value;$('#ndBairro').value=r.bairro||$('#ndBairro').value;$('#ndMun').value=r.xMun||'';$('#ndUF').value=r.uf||'';$('#ndIbge').value=r.cMun||'';$('#ndNro').focus()}catch(e){toast(e.message||'Não foi possível buscar o CEP','warn')}};
   $('#ndBusca',m).onclick=busca;$('#ndCep',m).addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();busca()}});
   $('#ndCep',m).addEventListener('blur',()=>{if(so($('#ndCep').value).length===8&&!$('#ndIbge').value)busca()});
+  /* CEP completo já busca sozinho; mudar cidade ou UF à mão apaga o código da cidade, que é descoberto de novo ao finalizar */
+  $('#ndCep',m).addEventListener('input',()=>{const c=so($('#ndCep').value);if(c.length===8&&c!==$('#ndCep').dataset.ult){$('#ndCep').dataset.ult=c;busca()}});
+  ['#ndMun','#ndUF'].forEach(q=>$(q,m).addEventListener('input',()=>{$('#ndIbge').value=''}));
 }
 function preencheDest(d){const e=d.end||{};$('#ndDoc').value=fmtDoc(d.doc||'');$('#ndNome').value=d.nome||'';$('#ndEmail').value=d.email||'';$('#ndCep').value=e.cep||'';$('#ndLgr').value=e.lgr||'';$('#ndNro').value=e.nro||'';$('#ndCpl').value=e.cpl||'';$('#ndBairro').value=e.bairro||'';$('#ndMun').value=e.xMun||'';$('#ndUF').value=e.uf||'';$('#ndIbge').value=e.cMun||''}
 function lerDest(){return {doc:so($('#ndDoc').value),nome:$('#ndNome').value.trim(),email:$('#ndEmail').value.trim(),end:{cep:so($('#ndCep').value),lgr:$('#ndLgr').value.trim(),nro:$('#ndNro').value.trim(),cpl:$('#ndCpl').value.trim(),bairro:$('#ndBairro').value.trim(),xMun:$('#ndMun').value.trim(),uf:$('#ndUF').value,cMun:so($('#ndIbge').value)}}}
@@ -832,8 +841,7 @@ function validaDest(d){
   if(d.nome.length<2)return 'Informe o nome do cliente.';
   const e=d.end;if(e.cep.length!==8)return 'Informe o CEP do cliente.';
   if(!e.lgr||!e.nro||!e.bairro||!e.xMun||!e.uf)return 'Complete o endereço do cliente (rua, número, bairro, cidade e UF).';
-  if(e.cMun.length!==7)return 'Código IBGE da cidade inválido. Use a busca pelo CEP.';
-  if(UFCOD[e.uf]!==+e.cMun.slice(0,2))return 'O código IBGE não é da UF informada.';
+  if(e.cMun&&(e.cMun.length!==7||UFCOD[e.uf]!==+e.cMun.slice(0,2)))e.cMun='';
   if(d.email&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(d.email))return 'E-mail do cliente inválido.';
   return '';
 }
@@ -887,12 +895,13 @@ function pagar(){
   const falta=()=>r2(k.total-pago());
   const draw=()=>{
     const f=falta();const tr=f<0?r2(-f):0;
-    $('#pyRest').textContent=f>0?brl(f):'R$ 0,00';$('#pyRestL').textContent=f>0?'Falta pagar':'Pago';
+    $('#pyRest').textContent=f>0?brl(f):brl(pago());$('#pyRestL').textContent=f>0?'Falta pagar':(P.pags.length>1?'Pago em '+P.pags.length+' formas':'Pago');
     $('#pyTroco').innerHTML=tr?'<div class="paybox inv"><span>Troco</span><span class="v">'+brl(tr)+'</span></div>':'';
     $('#pyList').innerHTML=P.pags.map((p,i)=>'<div class="pl">'+FORMAS[p.forma].ic+'<span class="grow">'+FORMAS[p.forma].n+(p.parc>1?' · '+p.parc+'x':'')+'</span><b class="mono">'+brl(p.valor)+'</b><button class="ib" style="width:30px;height:30px" data-prm="'+i+'">'+IC.x+'</button></div>').join('');
     $$('#pyFormas button').forEach(b=>b.classList.toggle('on',b.dataset.f===P.forma));
     $('#pyParc').classList.toggle('hide',P.forma!=='credito');
-    $('#pyAdd').classList.toggle('hide',f<=0);$('#pyIn').closest('.row').classList.toggle('hide',f<=0);
+    $('#pyIn').closest('.row').classList.toggle('hide',f<=0);$('#pyDica').classList.toggle('hide',f<=0||P.pags.length>0);
+    $('#pyInL').textContent=P.pags.length?'Valor em '+FORMAS[P.forma].n+' (R$)':(P.forma==='dinheiro'?'Valor recebido (R$)':'Valor em '+FORMAS[P.forma].n+' (R$)');
     if(f>0){$('#pyIn').placeholder=nfmt(f,2)}
     $('#pyNfF').classList.toggle('hide',!nf);$('#pySemNf').classList.toggle('hide',nf);
     $('#pyFim').textContent=nf?'Finalizar e emitir NF-e':'Finalizar venda';
@@ -904,15 +913,16 @@ function pagar(){
   modal({title:'Pagamento',size:'w',body:
     '<div class="split"><div style="display:flex;flex-direction:column;gap:12px">'+
     '<div class="paybox inv"><span>Total da venda</span><span class="v">'+brl(k.total)+'</span></div>'+
-    '<div class="pays" id="pyFormas">'+Object.keys(FORMAS).map((f,i)=>'<button data-f="'+f+'">'+FORMAS[f].ic+FORMAS[f].n+'<span class="small muted">'+(i+1)+'</span></button>').join('')+'</div>'+
-    '<div class="row"><label class="f grow">Valor recebido (R$)<input class="i mono" id="pyIn" inputmode="decimal" style="font-size:18px" autofocus></label><label class="f hide" id="pyParc">Parcelas<select class="i">'+Array.from({length:12},(_,i)=>'<option value="'+(i+1)+'">'+(i+1)+'x</option>').join('')+'</select></label></div>'+
+    '<div class="pays" id="pyFormas">'+Object.keys(FORMAS).map(f=>'<button data-f="'+f+'">'+FORMAS[f].ic+FORMAS[f].n+'</button>').join('')+'</div>'+
+    '<div class="row" style="align-items:flex-end;flex-wrap:nowrap"><label class="f grow" style="min-width:0"><span id="pyInL">Valor recebido (R$)</span><input class="i mono" id="pyIn" inputmode="decimal" style="font-size:18px" autofocus></label><label class="f hide" id="pyParc" style="width:92px">Parcelas<select class="i">'+Array.from({length:12},(_,i)=>'<option value="'+(i+1)+'">'+(i+1)+'x</option>').join('')+'</select></label><button class="btn" type="button" id="pyAdd" style="height:46px;white-space:nowrap">'+IC.mais+' Adicionar</button></div>'+
+    '<div class="small muted" id="pyDica">Mais de uma forma? Escolha a forma, digite quanto o cliente paga nela e toque em <b>Adicionar</b>. Depois escolha a próxima forma para o restante.</div>'+
     '<div class="plist" id="pyList"></div>'+
     '<div class="paybox"><span id="pyRestL">Falta pagar</span><span class="v" id="pyRest"></span></div><div id="pyTroco"></div></div>'+
     '<div style="display:flex;flex-direction:column;gap:10px"><div class="nfhead"><label class="sw"><input type="checkbox" id="pyNf"'+(nf?' checked':'')+(fok?'':' disabled')+'><span></span></label><div><b>Emitir NF-e (modelo 55)</b><div class="small muted">'+(fok?esc(modoTxt):'Configure o emitente em Configurações › Nota fiscal para emitir.')+'</div></div></div>'+
     '<div id="pyNfF">'+(()=>{const fn=faltaNCM(CART.itens);return fn.length?'<div class="note" style="margin-bottom:10px"><b>Sem NCM:</b> '+esc(fn.join(', '))+'. A nota não sai enquanto o produto não tiver NCM. Cadastre em Estoque ou desligue a NF-e desta venda.</div>':''})()+destForm({})+'</div>'+
     '<div id="pySemNf" class="grid2"><label class="f">Nome do cliente (opcional)<input class="i" id="clN"></label><label class="f">WhatsApp (opcional)<input class="i mono" id="clT" inputmode="tel" placeholder="(21) 99999-9999"></label></div>'+
     '</div></div>',
-    foot:'<button class="btn ghost" data-act="mclose">Voltar</button><button class="btn" id="pyAdd">Adicionar pagamento</button><button class="btn pri lg" id="pyFim">Finalizar venda</button>',
+    foot:'<button class="btn ghost" data-act="mclose">Voltar</button><button class="btn pri lg" id="pyFim">Finalizar venda</button>',
     init:m=>{
       destBind(m);
       $('#pyNf',m).onchange=e=>{nf=e.target.checked;draw()};
@@ -922,11 +932,14 @@ function pagar(){
       m.addEventListener('keydown',e=>{if(e.target.matches('input,select,textarea'))return;if(/^[1-4]$/.test(e.key)){P.forma=Object.keys(FORMAS)[+e.key-1];draw();e.preventDefault()}});
       $('#pyList',m).onclick=e=>{const b=e.target.closest('[data-prm]');if(b){P.pags.splice(+b.dataset.prm,1);draw();$('#pyIn').focus()}};
       $('#pyFim',m).onclick=()=>{
-        if(falta()>0){addP();if(falta()>0)return}
+        if(falta()>0){addP();if(falta()>0){toast('Ainda falta '+brl(falta())+'. Escolha a forma para o restante e toque em Adicionar ou Finalizar.','warn');return}}
         let dest=null;
         if(nf){dest=lerDest();const er=validaDest(dest);if(er){toast(er,'warn');return}
           const fn=faltaNCM(CART.itens);if(fn.length){toast('Sem NCM: '+fn.join(', ')+'. Cadastre o NCM em Estoque ou finalize sem nota.','bad');return}}
+        (async()=>{
+        if(nf&&!dest.end.cMun&&ONLINE){const c=await codMunicipio(dest.end.xMun,dest.end.uf);if(c===''){toast('Não encontrei a cidade “'+dest.end.xMun+'” em '+dest.end.uf+'. Confira o nome ou digite o CEP.','warn');$('#ndMun').focus();return}if(c){dest.end.cMun=c;$('#ndIbge').value=c}}
         finalizar(k,P,dest,{nome:nf?dest.nome:$('#clN').value.trim(),doc:nf?fmtDoc(dest.doc):'',tel:nf?'':$('#clT').value.trim()});
+        })();
       };
       draw();
     }});
