@@ -446,7 +446,7 @@ function modal(o){
   if(o.init)o.init($('#modal .md'));
   const f=$('#modal [autofocus]');if(f)setTimeout(()=>f.focus(),30);
 }
-function closeModal(){if(MODAL&&MODAL.onClose)MODAL.onClose();MODAL=null;$('#modal').innerHTML='';stopScan();if(VIEW==='balcao')focusBusca()}
+function closeModal(){if(MODAL&&MODAL.onClose)MODAL.onClose();MODAL=null;$('#modal').innerHTML='';stopScan();if(VIEW==='balcao')focusBusca();if(UI.pendente)softRender()}
 function confirmar(title,msg,ok,okTxt='Confirmar',danger){modal({title,size:'s',body:'<div>'+msg+'</div>',foot:'<button class="btn ghost" data-act="mclose">Voltar</button><button class="btn '+(danger?'danger':'pri')+'" id="cfOk">'+esc(okTxt)+'</button>',init:m=>{$('#cfOk',m).onclick=()=>{closeModal();ok()}}})}
 function gestao(cb){if(ehAdmin())cb();else toast('Só um gestor pode fazer isso.','warn')}
 function updLock(){}
@@ -509,11 +509,31 @@ let VIEW=ls.get('phfeira.view','balcao');
 const UI={vNf:'',cfgTab:'nf',est:'produtos',estQ:'',estCat:'',estInat:false,estBaixo:false,sel:new Set(),vQ:'',vDia:'',vFeira:null,vSt:'',busca:'',cat:'',relFeira:null,movs:null};
 function go(v){VIEW=v;ls.set('phfeira.view',v);render()}
 function renderNav(){$('#nav').innerHTML=VIEWS.map(([k,n])=>'<button data-go="'+k+'" class="'+(VIEW===k?'on':'')+'">'+IC[k]+'<span>'+n+'</span></button>').join('')}
-function render(){
+function render(){UI.ed=new Map();UI.estrut=false;pinta()}
+/* chave estável de um campo, para devolver o que a pessoa digitou depois de uma atualização automática */
+function chaveCampo(el){if(el.id)return '#'+CSS.escape(el.id);for(const a of el.attributes)if(a.name.startsWith('data-'))return '['+a.name+'="'+CSS.escape(a.value)+'"]';if(el.name)return '[name="'+CSS.escape(el.name)+'"]';return null}
+function repinta(){
+  if(!USR||!EU)return;
+  const m=$('#main');if(!m)return;
+  /* arquivo escolhido ou linha adicionada à mão não têm como ser refeitos: nesses casos a tela não é redesenhada */
+  if(UI.estrut||$$('#main input[type=file]').some(f=>f.files&&f.files.length)){renderSync();return}
+  if(VIEW==='config'&&UI.ed&&UI.ed.size){renderSync();return}
+  const vis=[...m.querySelectorAll('*')];const chave=e=>e.tagName+'.'+e.className;const cont={};const pos=e=>{const k=chave(e);cont[k]=(cont[k]||0)+1;return k+'#'+cont[k]};
+  const rol=[];vis.forEach(e=>{const p=pos(e);if(e.scrollTop||e.scrollLeft)rol.push([p,e.scrollTop,e.scrollLeft])});
+  const abertos=$$('#main details').map(d=>d.open);const wy=scrollY;
+  pinta();
+  const c2={};const pos2=e=>{const k=chave(e);c2[k]=(c2[k]||0)+1;return k+'#'+c2[k]};const mapa={};m.querySelectorAll('*').forEach(e=>{mapa[pos2(e)]=e});
+  rol.forEach(([p,t,l])=>{const e=mapa[p];if(e){e.scrollTop=t;e.scrollLeft=l}});
+  $$('#main details').forEach((d,i)=>{if(abertos[i])d.open=true});
+  const sel=[];(UI.ed||new Map()).forEach((v,k)=>{let e;try{e=$('#main '+k)}catch(_){}if(!e)return;if(e.type==='checkbox'||e.type==='radio')e.checked=v.c;else e.value=v.v;if(e.tagName==='SELECT')sel.push(e)});
+  sel.forEach(e=>e.dispatchEvent(new Event('change',{bubbles:true})));
+  if(Math.abs(scrollY-wy)>2)scrollTo(0,wy);
+}
+function pinta(){
   if(!USR||!EU)return;
   renderNav();
   const f={balcao:vBalcao,vendas:vVendas,estoque:vEstoque,feira:vFeira,config:vConfig}[VIEW]||vBalcao;
-  UI.sujo=false;$('#main').innerHTML=f();
+  $('#main').innerHTML=f();
   $('#mbar').innerHTML='';$('#mbar').style.display='';
   if(VIEW==='balcao'){renderCart();renderProdGrid();focusBusca()}
   if(VIEW==='feira'&&UI.relFeira)carregaVendasFeira(UI.relFeira);
@@ -521,11 +541,14 @@ function render(){
 }
 let _softT=0;
 function softRender(){clearTimeout(_softT);_softT=setTimeout(()=>{
-  if(MODAL||!USR)return;
-  const a=document.activeElement;if(a&&a.matches&&a.matches('input,textarea,select')&&VIEW!=='balcao')return;
-  if(UI.sujo&&VIEW!=='balcao'){renderSync();return}
-  if(VIEW==='config'&&UI.cfgTab!=='fiscal'){renderSync();return}
-  if(VIEW==='balcao'){renderProdGrid();renderCart();$('#cxInfo')&&($('#cxInfo').innerHTML=cxInfoHtml())}else render()},300)}
+  if(!USR)return;
+  if(MODAL){UI.pendente=true;return}
+  UI.pendente=false;
+  const a=document.activeElement;if(a&&a.matches&&a.matches('input,textarea,select')&&a.closest('#main')&&VIEW!=='balcao'){UI.pendente=true;return}
+  if(VIEW==='balcao'){renderProdGrid();$('#cxInfo')&&($('#cxInfo').innerHTML=cxInfoHtml());return}
+  repinta()},300)}
+/* o que chegou enquanto um formulário/janela estava aberto aparece quando ele fecha */
+document.addEventListener('focusout',()=>{if(UI.pendente)setTimeout(()=>{if(!document.activeElement||!document.activeElement.matches('input,textarea,select'))softRender()},50)});
 /* ============================================================== BALCÃO */
 let CART=ls.get('phfeira.cart',{itens:[],descT:'R$',descV:0});
 const saveCart=()=>ls.set('phfeira.cart',CART);
@@ -1007,7 +1030,7 @@ function vEstoque(){
 }
 async function carregaMovs(){
   const {data,error}=await SB.from('movimentos').select('*').order('id',{ascending:false}).limit(400);
-  UI.movs=error?[]:data;if(VIEW==='estoque'&&UI.est==='movs')render();
+  UI.movs=error?[]:data;if(VIEW==='estoque'&&UI.est==='movs')repinta();
 }
 function vMovs(){
   if(!UI.movs){carregaMovs();return '<div class="card empty">Carregando movimentações…</div>'}
@@ -1266,7 +1289,7 @@ function cfgFiscal(){
   '<tr><td>Certificado A1</td><td class="r">'+(ci?'<b>'+esc(ci.titular)+'</b><br><span class="small">válido até '+esc(dBR(ci.validoAte))+'</span> '+(ci.vencido?'<span class="tag bad">Vencido</span>':ci.diasRestantes<=30?'<span class="tag warn">'+ci.diasRestantes+' dias</span>':'<span class="tag ok">Válido</span>'):'<span class="tag warn">Não instalado</span>')+'</td></tr>'+
   '<tr><td>Ambiente em uso</td><td class="r">'+(i.ambiente===1?'Produção':i.ambiente===2?'Homologação':'—')+'</td></tr>'+
   (i.erro?'<tr><td>Último erro</td><td class="r small">'+esc(i.erro)+'</td></tr>':'')+
-  '</tbody></table><div class="row" style="margin-top:12px"><button class="btn" data-act="sefaz-teste"'+(on?'':' disabled')+'>Testar comunicação com a SEFAZ</button></div><div id="sefazRes" class="small" style="margin-top:8px"></div></div>'+
+  '</tbody></table><div class="row" style="margin-top:12px"><button class="btn" data-act="sefaz-teste"'+(on?'':' disabled')+'>Testar comunicação com a SEFAZ</button></div><div id="sefazRes" class="small" style="margin-top:8px">'+(UI.sefazRes||'')+'</div></div>'+
   '<div class="card"><div class="sec">Como funciona</div><ol style="padding-left:18px;line-height:1.7;margin:6px 0"><li>O programa <b>PHOBOS Fiscal</b> fica num computador com internet (escritório ou casa).</li><li>O certificado A1 é instalado <b>nele</b>, pelo painel http://localhost:3334. Não sobe para a nuvem.</li><li>As vendas com NF-e entram numa fila. O PHOBOS Fiscal emite, cancela e inutiliza, e devolve o resultado em segundos.</li><li>Se ele estiver desligado, as notas esperam na fila e saem quando ele voltar.</li></ol><div class="small muted">Instalação no LEIAME do pacote PHOBOS Fiscal.</div></div></div>';
 }
 function cfgEquipe(){
@@ -1326,11 +1349,11 @@ document.addEventListener('click',e=>{
       'sel-limpar':()=>{UI.sel.clear();render()},inativar:()=>gestao(()=>inativar([...UI.sel],a.dataset.v==='1')),
       'feira-nova':()=>novaFeira(),'feira-edit':()=>novaFeira(null,UI.relFeira),'rel-imp':relImprimir,'rel-xls':relExcel,
       'cfg-salvar':async()=>{if(await saveCfg({empresa:$('#cgE').value.trim(),linha:$('#cgL').value.trim(),rodape:$('#cgR').value.trim()}))toast('Configurações salvas')},
-      'fs-salvar':salvarFiscal,'uf-add':()=>{const tb=$('#ufRows');tb.insertAdjacentHTML('beforeend',ufLinhas({SP:{pInterna:0,pFCP:0}}))},
+      'fs-salvar':salvarFiscal,'uf-add':()=>{UI.estrut=true;const tb=$('#ufRows');tb.insertAdjacentHTML('beforeend',ufLinhas({SP:{pInterna:0,pFCP:0}}))},
       'fe-cep':async()=>{try{const r=await buscaCep($('#feCep').value);$('#feLgr').value=r.lgr||'';$('#feBai').value=r.bairro||'';$('#feMun').value=r.xMun||'';$('#feUF').value=r.uf||'';$('#feIbge').value=r.cMun||'';$('#feNro').focus()}catch(e){toast(e.message||'CEP indisponível','warn')}},
 
 
-      'sefaz-teste':async()=>{const el=$('#sefazRes');el.textContent='Pedindo ao computador fiscal…';const {data:id,error}=await SB.rpc('pedir_status_sefaz');if(error){el.textContent=erroTxt(error);return}for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,1500));const {data}=await SB.from('fila_fiscal').select('status,resultado').eq('id',id).maybeSingle();if(data&&['feito','erro'].includes(data.status)){const r=data.resultado||{};el.innerHTML=r.ok?'<span class="tag ok">Em operação</span> '+esc(r.cStat+' · '+r.motivo):'<span class="tag bad">Falhou</span> '+esc(r.erro||((r.cStat||'')+' · '+(r.motivo||'')));return}}el.textContent='O computador fiscal não respondeu.'},
+      'sefaz-teste':async()=>{const put=h=>{UI.sefazRes=h;const el=$('#sefazRes');if(el)el.innerHTML=h};put(esc('Pedindo ao computador fiscal…'));const {data:id,error}=await SB.rpc('pedir_status_sefaz');if(error){put(esc(erroTxt(error)));return}for(let i=0;i<20;i++){await new Promise(r=>setTimeout(r,1500));const {data}=await SB.from('fila_fiscal').select('status,resultado').eq('id',id).maybeSingle();if(data&&['feito','erro'].includes(data.status)){const r=data.resultado||{};const hora=new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});put((r.ok?'<span class="tag ok">Em operação</span> '+esc(r.cStat+' · '+r.motivo):'<span class="tag bad">Falhou</span> '+esc(r.erro||((r.cStat||'')+' · '+(r.motivo||''))))+' <span class="muted">· testado às '+hora+'</span>');return}}put(esc('O computador fiscal não respondeu.'))},
       'nf-inut':()=>{const ini=+$('#inIni').value,fim=+$('#inFim').value||ini,j=$('#inJus').value.trim();if(!(ini>0)||fim<ini){toast('Informe a faixa de números','warn');return}if(j.length<15){toast('Justificativa com pelo menos 15 letras','warn');return}
         confirmar('Inutilizar numeração','Inutilizar os números '+ini+(fim>ini?' a '+fim:'')+' na SEFAZ? Não dá para desfazer.',async()=>{const {error}=await SB.rpc('pedir_inutilizacao',{p_ini:ini,p_fim:fim,p_just:j});toast(error?erroTxt(error):'Pedido enviado ao computador fiscal. Acompanhe o resultado na fila.',error?'bad':'')},'Inutilizar',true)},
       'nf-pend':nfPendentes,'nf-filtro':()=>{UI.vNf='pend';UI.vFeira='';render()},
@@ -1353,14 +1376,14 @@ document.addEventListener('click',e=>{
   const cx=t.closest('[data-cx]');if(cx){const c=D.caixas[cx.dataset.cx];if(c)modal({title:'Caixa de '+dtBR(c.abert),size:'s',body:fechHtml(c),foot:(PODE_IMP?'<button class="btn" id="fxP">'+IC.imp+' Imprimir</button>':'')+'<button class="btn ghost" data-act="mclose">Fechar</button>',init:m=>{const p=$('#fxP',m);if(p)p.onclick=()=>imprimirFech(c)}});return}
   const pfs=t.closest('[data-pfs]');if(pfs){const id=pfs.dataset.pfs;(async()=>{const {error}=await SB.rpc('ajustar_perfil',{p_id:id,p_nome:$('[data-pfn="'+id+'"]').value,p_papel:$('[data-pfp="'+id+'"]').value,p_ativo:$('[data-pfa="'+id+'"]').checked});if(error){toast(erroTxt(error),'bad');return}const {data}=await SB.from('perfis').select('*');(data||[]).forEach(r=>{D.perfis[r.id]=r});toast('Equipe atualizada');render()})();return}
   const xm=t.closest('[data-xml]');if(xm){baixarXml(xm.dataset.xml);return}
-  const ufr=t.closest('[data-ufrm]');if(ufr){ufr.closest('tr').remove();return}
+  const ufr=t.closest('[data-ufrm]');if(ufr){UI.estrut=true;ufr.closest('tr').remove();return}
   const ct2=t.closest('[data-cfgtab]');if(ct2){UI.cfgTab=ct2.dataset.cfgtab;render();return}
   const dn=t.closest('[data-danfe]');if(dn){const v=D.vendas[dn.dataset.danfe];if(v)verDanfe(v);return}
   const nd=t.closest('[data-nfdest]');if(nd){const v=D.vendas[nd.dataset.nfdest];if(v){closeModal();editarDest(v,VIEW==='vendas'?()=>{render();vendaDet(v.id)}:null)}return}
   const nr=t.closest('[data-nfre]');if(nr){const v=D.vendas[nr.dataset.nfre];if(v){closeModal();pedirNF(v)}return}
   const nn=t.closest('[data-nfnova]');if(nn){const v=D.vendas[nn.dataset.nfnova];if(v){closeModal();emitirDepois(v)}return}
 });
-['input','change'].forEach(ev=>document.addEventListener(ev,e=>{const t=e.target;if(t&&t.closest&&t.closest('#main')&&t.matches('input,textarea,select'))UI.sujo=true},true));
+['input','change'].forEach(ev=>document.addEventListener(ev,e=>{const t=e.target;if(!e.isTrusted||!t||!t.closest||!t.closest('#main')||!t.matches('input,textarea,select')||t.type==='file')return;const k=chaveCampo(t);if(!k)return;(UI.ed||(UI.ed=new Map())).set(k,{v:t.value,c:t.checked})},true));
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.id==='busca'){UI.busca=t.value;renderProdGrid();return}
