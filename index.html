@@ -232,11 +232,12 @@ video.scan{width:100%;border-radius:12px;background:#000;max-height:50vh}
   .grid4{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:720px){
-  main{padding:12px 12px 150px}
+  main{padding:12px 12px calc(var(--navh,64px) + var(--mbarh,0px) + 24px)}
   .top{padding:8px 12px;gap:8px}
   .brand small{display:none}
-  .nav{position:fixed;left:0;right:0;bottom:0;margin:0;background:var(--surface);border-top:1px solid var(--card-line);justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom));z-index:40}
-  .nav button{flex-direction:column;gap:2px;font-size:10px;padding:6px 4px;flex:1}
+  .nav{position:fixed;left:0;right:0;bottom:0;margin:0;background:var(--surface);border-top:1px solid var(--card-line);justify-content:space-around;gap:4px;padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:40}
+  .nav button{flex-direction:column;gap:3px;font-size:10.5px;padding:7px 2px 6px;flex:1;min-width:0;border-radius:12px;line-height:1.1}
+  .nav svg{width:20px;height:20px;flex:none}
   .nav button span{display:block}
   .pill .txt{display:none}
   .grid2,.grid3{grid-template-columns:1fr}
@@ -251,11 +252,12 @@ video.scan{width:100%;border-radius:12px;background:#000;max-height:50vh}
   .tbl.cards td::before{content:attr(data-l);color:var(--muted);font-size:12px;font-weight:600;text-align:left}
   .tbl.cards td.r,.tbl.cards td.c{text-align:right}
   .tbl.cards td[data-l=""]::before{content:none}
-  .mbar{display:flex;position:fixed;left:0;right:0;bottom:62px;z-index:35;padding:10px 12px;background:var(--surface);border-top:1px solid var(--card-line);align-items:center;gap:10px}
+  .mbar{display:flex;position:fixed;left:0;right:0;bottom:var(--navh,64px);z-index:35;padding:10px 12px;background:var(--surface);border-top:1px solid var(--card-line);align-items:center;gap:10px}
+  .mbar:empty{display:none}
   .mbar .v{font-size:20px;font-weight:800;color:var(--ink);flex:1}
-  .toasts{bottom:140px;left:12px;right:12px}
+  .toasts{bottom:calc(var(--navh,64px) + var(--mbarh,0px) + 12px);left:12px;right:12px}
   .ov{padding:0;align-items:flex-end}
-  .md{border-radius:16px 16px 0 0;max-height:92vh;overflow:auto}
+  .md{border-radius:16px 16px 0 0;max-height:92vh;overflow:auto;padding-bottom:env(safe-area-inset-bottom)}
 }
 </style>
 </head>
@@ -508,6 +510,9 @@ const VIEWS=[['balcao','Balcão'],['vendas','Vendas'],['estoque','Estoque'],['fe
 let VIEW=ls.get('phfeira.view','balcao');
 const UI={vNf:'',cfgTab:'nf',est:'produtos',estQ:'',estCat:'',estInat:false,estBaixo:false,sel:new Set(),vQ:'',vDia:'',vFeira:null,vSt:'',busca:'',cat:'',relFeira:null,movs:null};
 function go(v){VIEW=v;ls.set('phfeira.view',v);render()}
+function medeBarras(){const m=matchMedia('(max-width:720px)').matches;const n=$('#nav'),b=$('#mbar');const r=document.documentElement.style;r.setProperty('--navh',(m&&n?n.offsetHeight:0)+'px');r.setProperty('--mbarh',(m&&b&&b.offsetHeight?b.offsetHeight:0)+'px')}
+if(window.ResizeObserver){const ro=new ResizeObserver(medeBarras);addEventListener('DOMContentLoaded',()=>{['#nav','#mbar'].forEach(q=>{const e=$(q);if(e)ro.observe(e)});medeBarras()})}
+addEventListener('resize',medeBarras);
 function renderNav(){$('#nav').innerHTML=VIEWS.map(([k,n])=>'<button data-go="'+k+'" class="'+(VIEW===k?'on':'')+'">'+IC[k]+'<span>'+n+'</span></button>').join('')}
 function render(){UI.ed=new Map();UI.estrut=false;pinta()}
 /* chave estável de um campo, para devolver o que a pessoa digitou depois de uma atualização automática */
@@ -537,7 +542,7 @@ function pinta(){
   $('#mbar').innerHTML='';$('#mbar').style.display='';
   if(VIEW==='balcao'){renderCart();renderProdGrid();focusBusca()}
   if(VIEW==='feira'&&UI.relFeira)carregaVendasFeira(UI.relFeira);
-  renderSync();
+  renderSync();medeBarras();
 }
 let _softT=0;
 function softRender(){clearTimeout(_softT);_softT=setTimeout(()=>{
@@ -600,7 +605,7 @@ function renderCart(){
     (k.dG?'<div class="l"><span class="muted"></span><span>− '+brl(k.dG)+'</span></div>':'')+
     '<div class="l big"><span>Total</span><span>'+brl(k.total)+'</span></div>'+
     '<div class="row" style="margin-top:6px"><button class="btn ghost" data-act="cart-limpar"'+(CART.itens.length?'':' disabled')+'>Limpar</button><button class="btn pri lg grow" data-act="pagar"'+(CART.itens.length?'':' disabled')+'>Pagamento <span class="small" style="opacity:.7">F2</span></button></div>';
-  $('#mbar').innerHTML=CART.itens.length?'<div class="v">'+brl(k.total)+'<div class="small muted" style="font-weight:600">'+qfmt(k.q)+' itens</div></div><button class="btn pri lg" data-act="pagar">Pagamento</button>':'';
+  $('#mbar').innerHTML=CART.itens.length?'<div class="v">'+brl(k.total)+'<div class="small muted" style="font-weight:600">'+qfmt(k.q)+' itens</div></div><button class="btn pri lg" data-act="pagar">Pagamento</button>':'';medeBarras();
 }
 function focusBusca(){const b=$('#busca');if(b&&!MODAL&&matchMedia('(min-width:721px)').matches)b.focus()}
 function addCart(p,qtd=1){
