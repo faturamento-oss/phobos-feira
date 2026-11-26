@@ -359,6 +359,7 @@ const semRede=e=>/Failed to fetch|NetworkError|fetch failed|Load failed|network/
 const saldo=(pid,local)=>{const s=D.estoque[pid]||{};return local?(s[local]||0):Object.values(s).reduce((a,b)=>a+b,0)};
 const prods=(inativos)=>Object.values(D.produtos).filter(p=>inativos||p.ativo!==false).sort((a,b)=>String(a.nome).localeCompare(String(b.nome),'pt-BR'));
 const feiraAt=()=>D.feiras[CTX.feira]||null;
+const meusCaixas=()=>Object.values(D.caixas).filter(c=>!c.fech&&c.usuario===(USR&&USR.id)).sort((a,b)=>b.abert-a.abert);
 const caixaAt=()=>{const c=D.caixas[CTX.caixa];return c&&!c.fech&&c.usuario===(USR&&USR.id)?c:null};
 const vendasDe=(f)=>Object.values(D.vendas).filter(v=>!f||v.feira===f);
 const pagLiq=v=>{const o={dinheiro:0,pix:0,debito:0,credito:0};(v.pags||[]).forEach(p=>{o[p.forma]=r2((o[p.forma]||0)+p.valor)});o.dinheiro=r2(o.dinheiro-(v.troco||0));return o};
@@ -575,7 +576,22 @@ function cartCalc(){
 }
 function cxInfoHtml(){
   const c=caixaAt();if(!c)return'';const f=D.feiras[c.feira];
-  return '<div class="grow" style="min-width:0"><div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(f?f.nome:'Feira')+'</div><div class="small muted">'+[c.op,c.local].filter(Boolean).map(esc).join(' · ')+' · caixa aberto às '+hBR(c.abert)+'</div></div>';
+  return '<div class="grow" style="min-width:0"><div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(f?f.nome:'Feira')+'</div><div class="small muted">'+[c.op,c.local].filter(Boolean).map(esc).join(' · ')+' · caixa aberto às '+hBR(c.abert)+'</div></div><button class="btn sm" data-act="cx-trocar" title="Trocar de feira ou de caixa">Trocar</button>';
+}
+/* uma pessoa pode ter um caixa aberto em cada feira e alternar entre eles */
+function usarCaixa(cx){setCtx({caixa:cx.id,feira:cx.feira});UI.relFeira=cx.feira;closeModal();toast('Vendendo agora em '+((D.feiras[cx.feira]||{}).nome||'outra feira'));render()}
+function trocarCaixa(){
+  const atual=caixaAt();const ms=meusCaixas();
+  modal({title:'Trocar de feira',body:
+    '<div class="small muted" style="margin-bottom:10px">Seus caixas abertos. Cada feira tem o próprio caixa e o próprio estoque; a venda sai do caixa escolhido aqui.</div>'+
+    ms.map(c=>{const f=D.feiras[c.feira]||{};const r=cxResumo(c);return '<div class="card" style="padding:12px;margin-bottom:8px;display:flex;gap:10px;align-items:center"><div class="grow" style="min-width:0"><div style="font-weight:700;overflow-wrap:anywhere">'+esc(f.nome||'Feira')+(f.homolog||/homolog/i.test(f.nome||'')?' <span class="tag">Teste</span>':'')+'</div><div class="small muted">Estoque '+esc(c.local)+' · aberto às '+hBR(c.abert)+' de '+dBR(dKey(c.abert))+' · '+r.vs.length+' vendas</div></div>'+(atual&&atual.id===c.id?'<span class="tag ok">Em uso</span>':'<button class="btn sm pri" data-usarcx="'+esc(c.id)+'">Usar este</button>')+'</div>'}).join('')+
+    (CART.itens.length?'<div class="small" style="margin-top:6px"><b>Atenção:</b> há uma venda em andamento no carrinho. Ela continua no carrinho e será registrada no caixa que estiver em uso na hora do pagamento.</div>':''),
+    foot:(atual?'<button class="btn" id="tcFechar">Fechar o caixa em uso</button>':'')+'<span class="grow"></span><button class="btn ghost" data-act="mclose">Cancelar</button><button class="btn pri" id="tcNovo">'+IC.mais+' Abrir caixa em outra feira</button>',
+    init:m=>{
+      $$('[data-usarcx]',m).forEach(b=>b.onclick=()=>usarCaixa(D.caixas[b.dataset.usarcx]));
+      $('#tcNovo',m).onclick=()=>{closeModal();abrirCaixa(true)};
+      const fc=$('#tcFechar',m);if(fc)fc.onclick=()=>{closeModal();fecharCaixa()};
+    }});
 }
 function vBalcao(){
   const c=caixaAt();
@@ -642,21 +658,24 @@ async function gravaCaixa(c){
   if(error){if(semRede(error))return fila();toast(erroTxt(error),'bad');return false}
   D.caixas[c.id]=c;return true;
 }
-function abrirCaixa(){
+function abrirCaixa(outra){
   const fs=Object.values(D.feiras).filter(f=>!f.encerrada).sort((a,b)=>String(b.inicio).localeCompare(String(a.inicio)));
   const c=cfg();
   if(!fs.length){if(ehAdmin()){toast('Cadastre a feira primeiro.','warn');novaFeira(()=>abrirCaixa())}else toast('Nenhuma feira aberta. Peça para um gestor cadastrar.','warn');return}
-  const fsel=CTX.feira&&D.feiras[CTX.feira]&&!D.feiras[CTX.feira].encerrada?CTX.feira:fs[0].id;
+  const comCx=new Set(meusCaixas().map(c=>c.feira));
+  let fsel=CTX.feira&&D.feiras[CTX.feira]&&!D.feiras[CTX.feira].encerrada?CTX.feira:fs[0].id;
+  if(outra||comCx.has(fsel)){const l=fs.find(f=>!comCx.has(f.id));if(l)fsel=l.id}
   modal({title:'Abrir caixa',size:'s',body:
     '<div class="muted small">Caixa de <b>'+esc(EU.nome)+'</b></div>'+
-    '<label class="f">Feira<select class="i" id="axF">'+fs.map(f=>'<option value="'+esc(f.id)+'"'+(f.id===fsel?' selected':'')+'>'+esc(f.nome)+'</option>').join('')+'</select></label>'+
+    '<label class="f">Feira<select class="i" id="axF">'+fs.map(f=>'<option value="'+esc(f.id)+'"'+(f.id===fsel?' selected':'')+'>'+esc(f.nome)+(comCx.has(f.id)?' (seu caixa já está aberto)':'')+'</option>').join('')+'</select></label>'+
     '<label class="f">Estoque de onde sai a mercadoria<select class="i" id="axL">'+c.locais.map(l=>'<option'+((D.feiras[fsel]&&D.feiras[fsel].local)===l?' selected':'')+'>'+esc(l)+'</option>').join('')+'</select></label>'+
     '<label class="f">Fundo de troco (R$)<input class="i mono" id="axFu" inputmode="decimal" placeholder="0,00" autofocus></label>',
     foot:'<button class="btn ghost" data-act="mclose">Cancelar</button><button class="btn pri" id="axOk">Abrir caixa</button>',
     init:m=>{
       $('#axF',m).onchange=e=>{const f=D.feiras[e.target.value];if(f&&f.local)$('#axL').value=f.local};
       $('#axFu',m).onkeydown=e=>{if(e.key==='Enter')$('#axOk').click()};
-      $('#axOk',m).onclick=async()=>{const b=$('#axOk');b.disabled=true;
+      $('#axOk',m).onclick=async()=>{const ja=meusCaixas().find(c=>c.feira===$('#axF').value);if(ja){usarCaixa(ja);return}
+        const b=$('#axOk');b.disabled=true;
         const cx={id:uid(),feira:$('#axF').value,usuario:USR.id,op:EU.nome,local:$('#axL').value,fundo:r2(num($('#axFu').value)),abert:Date.now(),movs:[],fech:null};
         if(await gravaCaixa(cx)){setCtx({caixa:cx.id,feira:cx.feira});closeModal();toast('Caixa aberto');render()}else b.disabled=false}}});
 }
@@ -1214,14 +1233,16 @@ function relDados(fid){
 const barra=(v,max)=>'<div class="barw"><div class="bar" style="width:'+(max>0&&v>0?Math.max(1,v/max*100):0)+'%"></div></div>';
 function vFeira(){
   const fs=Object.values(D.feiras).sort((a,b)=>String(b.inicio).localeCompare(String(a.inicio)));
-  const cx=caixaAt();
   if(!fs.length)return '<div class="ptitle"><h1>Feira</h1></div><div class="card empty"><h3>Nenhuma feira cadastrada</h3>Cadastre a feira, o local do estoque que vai para o estande e abra o caixa.<div style="margin-top:14px"><button class="btn pri" data-act="feira-nova">'+IC.mais+' Nova feira</button></div></div>';
   let fid=UI.relFeira||CTX.feira||fs[0].id;if(!D.feiras[fid])fid=fs[0].id;UI.relFeira=fid;
+  const meuAqui=meusCaixas().find(c=>c.feira===fid);if(meuAqui&&CTX.caixa!==meuAqui.id)setCtx({caixa:meuAqui.id,feira:fid});
+  const outroCx=!meuAqui&&meusCaixas()[0];
   const f=D.feiras[fid];const R=relDados(fid);
+  const cx=meuAqui||null;
   const cxs=Object.values(D.caixas).filter(c=>c.feira===fid).sort((a,b)=>b.abert-a.abert);
   let cxCard;
   if(cx){const r=cxResumo(cx);cxCard='<div class="card"><div class="row"><div class="grow"><div class="sec" style="margin:0">Meu caixa · aberto</div><div style="font-weight:700;margin-top:4px">'+[cx.op,(D.feiras[cx.feira]||{}).nome].filter(Boolean).map(esc).join(' · ')+'</div><div class="small muted">Aberto às '+hBR(cx.abert)+' de '+dBR(dKey(cx.abert))+' · estoque '+esc(cx.local)+'</div></div><div style="text-align:right"><div class="small muted">Dinheiro esperado na gaveta</div><div style="font-size:22px;font-weight:800" class="mono">'+brl(r.esp.dinheiro)+'</div></div></div><div class="row" style="margin-top:12px"><span class="small muted grow">'+r.vs.length+' vendas · '+brl(r.total)+'</span><button class="btn sm" data-act="cx-mov" data-t="suprimento">Suprimento</button><button class="btn sm" data-act="cx-mov" data-t="sangria">Sangria</button><button class="btn sm pri" data-act="cx-fechar">Fechar caixa</button></div></div>'}
-  else cxCard='<div class="card row"><div class="grow"><div class="sec" style="margin:0">Meu caixa</div><div class="muted">Fechado</div></div><button class="btn pri" data-act="cx-abrir">Abrir caixa</button></div>';
+  else cxCard='<div class="card row" style="flex-wrap:wrap"><div class="grow"><div class="sec" style="margin:0">Meu caixa nesta feira</div><div class="muted">'+(outroCx?'Fechado aqui. Seu caixa aberto está na feira <b>'+esc((D.feiras[outroCx.feira]||{}).nome||'')+'</b>.':'Fechado')+'</div></div>'+(outroCx?'<button class="btn" data-usarcx2="'+esc(outroCx.id)+'">Voltar para '+esc((D.feiras[outroCx.feira]||{}).nome||'a outra feira')+'</button>':'')+'<button class="btn pri" data-act="cx-abrir-aqui">Abrir caixa nesta feira</button></div>';
   const maxP=Math.max(0,...Object.values(R.pf));const pps=Object.values(R.pp).sort((a,b)=>b.t-a.t);const maxPr=pps.length?pps[0].t:0;
   const dias=Object.keys(R.pd).sort();const maxD=Math.max(0,...dias.map(d=>R.pd[d].t));
   const hs=Object.keys(R.ph).map(Number).sort((a,b)=>a-b);const maxH=Math.max(0,...Object.values(R.ph));
@@ -1367,7 +1388,7 @@ document.addEventListener('click',e=>{
       tema:()=>{const es=document.documentElement.dataset.tema==='escuro';if(es)delete document.documentElement.dataset.tema;else document.documentElement.dataset.tema='escuro';try{localStorage.setItem('phfeira.tema2',es?'claro':'escuro')}catch(e){}},
       sair,
       'sync-info':()=>toast(!ONLINE?'Sem internet. As vendas ficam guardadas neste aparelho e sobem sozinhas quando a conexão voltar.':FILA.length?FILA.length+' registro(s) esperando para subir.':syncMode==='tempo-real'?'Conectado em tempo real: estoque e vendas dos outros caixas aparecem na hora.':'Conectado. Atualizando a cada 15 segundos.'),
-      'cx-abrir':abrirCaixa,'cx-fechar':fecharCaixa,'cx-mov':()=>cxMov(a.dataset.t),
+      'cx-abrir':()=>abrirCaixa(),'cx-trocar':trocarCaixa,'cx-abrir-aqui':()=>{setCtx({feira:UI.relFeira});abrirCaixa()},'cx-fechar':fecharCaixa,'cx-mov':()=>cxMov(a.dataset.t),
       pagar,'cart-limpar':()=>confirmar('Limpar venda','Remover todos os itens da venda em andamento?',()=>{CART={itens:[],descT:'R$',descV:0};saveCart();renderCart()},'Limpar',true),
       scan:()=>scanCam(code=>{UI.busca=code;buscaEnter()}),
       'vendas-xls':()=>{const vs=vendasFiltradas();exportar('Vendas-'+today(),[{nome:'Vendas',linhas:[['Nº','Data','Hora','Feira','NF-e nº','Situação NF-e','Chave de acesso','ICMS','DIFAL UF destino','FCP UF destino','Itens','Total','Pagamento','Cliente','Situação']].concat(vs.map(v=>[v.num,dBR(v.dia),hBR(v.ts),(D.feiras[v.feira]||{}).nome||'',v.nf&&v.nf.numero||'',v.nf?(NFS[v.nf.status]||[v.nf.status])[0]:'Sem nota',v.nf&&v.nf.chave||'',+((v.nf&&v.nf.tot||{}).vICMS||0),+((v.nf&&v.nf.tot||{}).vICMSUFDest||0),+((v.nf&&v.nf.tot||{}).vFCPUFDest||0),v.itens.reduce((x,i)=>x+i.qtd,0),v.total,v.pags.map(p=>FORMAS[p.forma].n+' '+nfmt(p.valor,2)).join(' + '),v.cli&&v.cli.nome||'',v.status==='cancelada'?'Cancelada':'Concluída']))},{nome:'Itens',linhas:[['Venda','Data','SKU','Produto','Qtd.','Preço','Desc. %','Total','Situação']].concat(vs.flatMap(v=>v.itens.map(i=>[v.num,dBR(v.dia),i.sku,i.nome,i.qtd,i.preco,i.dpct||0,i.total,v.status==='cancelada'?'Cancelada':'Concluída'])))}])},
@@ -1393,6 +1414,7 @@ document.addEventListener('click',e=>{
     };
     if(A[k]){e.preventDefault();A[k]()}return}
   const ad=t.closest('[data-add]');if(ad){const p=D.produtos[ad.dataset.add];if(p)addCart(p);focusBusca();return}
+  const u2=t.closest('[data-usarcx2]');if(u2){const c=D.caixas[u2.dataset.usarcx2];if(c)usarCaixa(c);return}
   const ct=t.closest('[data-cat]');if(ct){UI.cat=ct.dataset.cat;render();return}
   const q=t.closest('[data-q]');if(q){const i=CART.itens[+q.dataset.q];if(!i)return;const d=+q.dataset.d;if(d>0){const p=D.produtos[i.prod];const c=caixaAt();const s=saldo(i.prod,c&&c.local)-CART.itens.filter(x=>x.prod===i.prod&&x!==i).reduce((a,x)=>a+x.qtd,0);if(i.qtd+1>s){if(cfg().bloqueia){toast('Sem estoque suficiente (saldo '+qfmt(s)+').','bad');return}toast('Atenção: saldo de '+(p?p.nome:'')+' é '+qfmt(s)+'.','warn')}}i.qtd=r2(i.qtd+d);if(i.qtd<=0)CART.itens.splice(+q.dataset.q,1);saveCart();renderCart();return}
   const rm=t.closest('[data-rm]');if(rm){CART.itens.splice(+rm.dataset.rm,1);saveCart();renderCart();focusBusca();return}
