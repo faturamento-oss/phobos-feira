@@ -275,6 +275,7 @@ video.scan{width:100%;border-radius:12px;background:#000;max-height:50vh}
   <div class="tright">
     <span class="pill" id="sync" data-act="sync-info"><span class="dot"></span><span class="txt">…</span></span>
     <button class="ib" data-act="tema" title="Tema claro/escuro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    <button class="ib hide" id="sairb" data-act="sair-conf" title="Sair" aria-label="Sair"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></button>
     <button class="ib hide" id="lockb" data-act="lock" title="Bloquear áreas de gestão"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0"/></svg></button>
   </div>
 </header>
@@ -458,6 +459,12 @@ function modal(o){
   const f=$('#modal [autofocus]');if(f)setTimeout(()=>f.focus(),30);
 }
 function closeModal(){if(MODAL&&MODAL.onClose)MODAL.onClose();MODAL=null;$('#modal').innerHTML='';stopScan();if(VIEW==='balcao')focusBusca();if(UI.pendente)softRender()}
+function sairConf(){
+  if(FILA.length){toast('Há '+FILA.length+' registro(s) esperando internet neste aparelho. Saia só depois que eles subirem, senão as vendas ficam presas aqui.','bad');return}
+  if(CART.itens.length){toast('Finalize ou limpe a venda em andamento antes de sair.','warn');return}
+  const cx=caixaAt();
+  confirmar('Sair do PHOBOS Feira',(cx?'Seu caixa da <b>'+esc((D.feiras[cx.feira]||{}).nome||'feira')+'</b> continua <b>aberto</b>. Se terminou o turno, feche o caixa antes de sair. ':'')+'Você volta para a tela de login neste aparelho.',sair,'Sair',true);
+}
 function confirmar(title,msg,ok,okTxt='Confirmar',danger){modal({title,size:'s',body:'<div>'+msg+'</div>',foot:'<button class="btn ghost" data-act="mclose">Voltar</button><button class="btn '+(danger?'danger':'pri')+'" id="cfOk">'+esc(okTxt)+'</button>',init:m=>{$('#cfOk',m).onclick=()=>{closeModal();ok()}}})}
 function gestao(cb){if(ehAdmin())cb();else toast('Só um gestor pode fazer isso.','warn')}
 function updLock(){}
@@ -467,11 +474,11 @@ function telaConfigurar(){
   $('#main').innerHTML='<div class="card" style="max-width:520px;margin:40px auto"><h1 style="font-size:22px;margin-bottom:6px">Conectar ao Supabase</h1><p class="muted">Cole o endereço e a chave pública do seu projeto (Supabase › Project Settings › API). Isso é feito uma vez por aparelho, ou fica fixo no arquivo <span class="mono">config.js</span>.</p>'+
   '<label class="f" style="margin-top:12px">Project URL<input class="i mono" id="sbU" placeholder="https://xxxx.supabase.co" value="'+esc(conf().url||'')+'"></label><label class="f" style="margin-top:10px">anon public key<input class="i mono" id="sbK" placeholder="eyJ..." value="'+esc(conf().anonKey||'')+'"></label>'+
   '<div class="row" style="margin-top:14px"><span class="grow"></span><button class="btn pri" id="sbOk">Conectar</button></div></div>';
-  $('#nav').innerHTML='';
+  $('#nav').innerHTML='';$('#sairb')&&$('#sairb').classList.add('hide');
   $('#sbOk').onclick=()=>{const url=$('#sbU').value.trim().replace(/\/$/,''),k=$('#sbK').value.trim();if(!/^https:\/\/.+/.test(url)||k.length<30){toast('Confira o endereço e a chave','warn');return}ls.set('phfeira.sb',{url,anonKey:k});location.reload()};
 }
 function telaLogin(){
-  $('#nav').innerHTML='';
+  $('#nav').innerHTML='';$('#sairb')&&$('#sairb').classList.add('hide');
   $('#main').innerHTML='<div class="card" style="max-width:420px;margin:40px auto"><h1 style="font-size:24px">Entrar</h1><p class="muted" style="margin:4px 0 14px">PHOBOS Feira</p>'+
   '<div class="tabs"><button class="on" data-lg="entrar">Entrar</button><button data-lg="criar">Criar acesso</button></div>'+
   '<label class="f hide" id="lgNomeL">Seu nome<input class="i" id="lgNome" autocomplete="name"></label>'+
@@ -494,7 +501,7 @@ function telaLogin(){
   $('#lgEsq').onclick=async()=>{const email=$('#lgEmail').value.trim();if(!email){toast('Digite seu e-mail primeiro','warn');return}const {error}=await SB.auth.resetPasswordForEmail(email,{redirectTo:location.href.split('#')[0]});toast(error?erroTxt(error):'Enviamos um link para trocar a senha.')};
 }
 function telaAguardando(){
-  $('#nav').innerHTML='';
+  $('#nav').innerHTML='';$('#sairb')&&$('#sairb').classList.add('hide');
   $('#main').innerHTML='<div class="card empty" style="max-width:520px;margin:40px auto"><h3>Acesso aguardando liberação</h3><p>Olá, '+esc((EU&&EU.nome)||USR.email)+'. Um gestor precisa liberar o seu acesso em Configurações › Equipe.</p><div class="row" style="justify-content:center;margin-top:14px"><button class="btn" data-act="sair">Sair</button><button class="btn pri" onclick="location.reload()">Já fui liberado</button></div></div>';
 }
 async function sair(){try{if(CANAL)await SB.removeChannel(CANAL);await SB.auth.signOut()}catch(e){}['phfeira.eu','phfeira.cache','phfeira.ctx'].forEach(k=>{try{localStorage.removeItem(k)}catch(e){}});location.reload()}
@@ -522,7 +529,7 @@ function go(v){VIEW=v;ls.set('phfeira.view',v);render()}
 function medeBarras(){const m=matchMedia('(max-width:720px)').matches;const n=$('#nav'),b=$('#mbar');const r=document.documentElement.style;r.setProperty('--navh',(m&&n?n.offsetHeight:0)+'px');r.setProperty('--mbarh',(m&&b&&b.offsetHeight?b.offsetHeight:0)+'px')}
 if(window.ResizeObserver){const ro=new ResizeObserver(medeBarras);addEventListener('DOMContentLoaded',()=>{['#nav','#mbar'].forEach(q=>{const e=$(q);if(e)ro.observe(e)});medeBarras()})}
 addEventListener('resize',medeBarras);
-function renderNav(){$('#nav').innerHTML=VIEWS.map(([k,n])=>'<button data-go="'+k+'" class="'+(VIEW===k?'on':'')+'">'+IC[k]+'<span>'+n+'</span></button>').join('')}
+function renderNav(){$('#sairb')&&$('#sairb').classList.toggle('hide',!USR);$('#nav').innerHTML=VIEWS.map(([k,n])=>'<button data-go="'+k+'" class="'+(VIEW===k?'on':'')+'">'+IC[k]+'<span>'+n+'</span></button>').join('')}
 function render(){UI.ed=new Map();UI.estrut=false;pinta()}
 /* chave estável de um campo, para devolver o que a pessoa digitou depois de uma atualização automática */
 function chaveCampo(el){if(el.id)return '#'+CSS.escape(el.id);for(const a of el.attributes)if(a.name.startsWith('data-'))return '['+a.name+'="'+CSS.escape(a.value)+'"]';if(el.name)return '[name="'+CSS.escape(el.name)+'"]';return null}
@@ -1417,7 +1424,7 @@ document.addEventListener('click',e=>{
       mclose:closeModal,
       tema:()=>{const es=document.documentElement.dataset.tema==='escuro';if(es)delete document.documentElement.dataset.tema;else document.documentElement.dataset.tema='escuro';try{localStorage.setItem('phfeira.tema2',es?'claro':'escuro')}catch(e){}},
       sair,
-      'sync-info':()=>toast(!ONLINE?'Sem internet. As vendas ficam guardadas neste aparelho e sobem sozinhas quando a conexão voltar.':FILA.length?FILA.length+' registro(s) esperando para subir.':syncMode==='tempo-real'?'Conectado em tempo real: estoque e vendas dos outros caixas aparecem na hora.':'Conectado. Atualizando a cada 15 segundos.'),
+      'sair-conf':sairConf,'sync-info':()=>toast(!ONLINE?'Sem internet. As vendas ficam guardadas neste aparelho e sobem sozinhas quando a conexão voltar.':FILA.length?FILA.length+' registro(s) esperando para subir.':syncMode==='tempo-real'?'Conectado em tempo real: estoque e vendas dos outros caixas aparecem na hora.':'Conectado. Atualizando a cada 15 segundos.'),
       'cx-abrir':()=>abrirCaixa(),'cx-trocar':trocarCaixa,'cx-abrir-aqui':()=>{setCtx({feira:UI.relFeira});abrirCaixa()},'cx-fechar':fecharCaixa,'cx-mov':()=>cxMov(a.dataset.t),
       pagar,'cart-limpar':()=>confirmar('Limpar venda','Remover todos os itens da venda em andamento?',()=>{CART={itens:[],descT:'R$',descV:0};saveCart();renderCart()},'Limpar',true),
       scan:()=>scanCam(code=>{UI.busca=code;buscaEnter()}),
