@@ -513,7 +513,7 @@ function render(){
   if(!USR||!EU)return;
   renderNav();
   const f={balcao:vBalcao,vendas:vVendas,estoque:vEstoque,feira:vFeira,config:vConfig}[VIEW]||vBalcao;
-  $('#main').innerHTML=f();
+  UI.sujo=false;$('#main').innerHTML=f();
   $('#mbar').innerHTML='';$('#mbar').style.display='';
   if(VIEW==='balcao'){renderCart();renderProdGrid();focusBusca()}
   if(VIEW==='feira'&&UI.relFeira)carregaVendasFeira(UI.relFeira);
@@ -523,6 +523,8 @@ let _softT=0;
 function softRender(){clearTimeout(_softT);_softT=setTimeout(()=>{
   if(MODAL||!USR)return;
   const a=document.activeElement;if(a&&a.matches&&a.matches('input,textarea,select')&&VIEW!=='balcao')return;
+  if(UI.sujo&&VIEW!=='balcao'){renderSync();return}
+  if(VIEW==='config'&&UI.cfgTab!=='fiscal'){renderSync();return}
   if(VIEW==='balcao'){renderProdGrid();renderCart();$('#cxInfo')&&($('#cxInfo').innerHTML=cxInfoHtml())}else render()},300)}
 /* ============================================================== BALCÃO */
 let CART=ls.get('phfeira.cart',{itens:[],descT:'R$',descV:0});
@@ -1358,6 +1360,7 @@ document.addEventListener('click',e=>{
   const nr=t.closest('[data-nfre]');if(nr){const v=D.vendas[nr.dataset.nfre];if(v){closeModal();pedirNF(v)}return}
   const nn=t.closest('[data-nfnova]');if(nn){const v=D.vendas[nn.dataset.nfnova];if(v){closeModal();emitirDepois(v)}return}
 });
+['input','change'].forEach(ev=>document.addEventListener(ev,e=>{const t=e.target;if(t&&t.closest&&t.closest('#main')&&t.matches('input,textarea,select'))UI.sujo=true},true));
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.id==='busca'){UI.busca=t.value;renderProdGrid();return}
